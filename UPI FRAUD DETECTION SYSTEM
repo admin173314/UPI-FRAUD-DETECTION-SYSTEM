@@ -1,0 +1,643 @@
+import pandas as pd
+import numpy as np
+import random
+from datetime import datetime, timedelta
+from sklearn.model_selection import train_test_split, cross_val_score, GridSearchCV
+from sklearn.preprocessing import StandardScaler, LabelEncoder
+from sklearn.linear_model import LogisticRegression
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
+from sklearn.svm import SVC
+from sklearn.neighbors import KNeighborsClassifier
+from sklearn.ensemble import IsolationForest
+from sklearn.metrics import (
+    accuracy_score, precision_score, recall_score, f1_score,
+    confusion_matrix, classification_report, roc_auc_score, roc_curve
+)
+import warnings
+import joblib
+import os
+
+warnings.filterwarnings('ignore')
+np.random.seed(42)
+def generate_upi_dataset(n_samples=100000, fraud_ratio=0.05):
+    """
+    Generate synthetic UPI transaction data simulating real-world patterns.
+    
+    Parameters:
+    -----------
+    n_samples : int
+        Total number of transactions to generate
+    fraud_ratio : float
+        Ratio of fraudulent transactions (0.05 = 5%)
+    
+    Returns:
+    --------
+    pd.DataFrame
+        DataFrame containing synthetic UPI transaction data
+    """
+    n_fraud = int(n_samples * fraud_ratio)
+    n_legit = n_samples - n_fraud
+    
+    banks = ['okhdfc', 'oksbi', 'okicici', 'okaxis', 'okbob', 'paytm', 
+             'googlepay', 'phonepe', 'amazonpay', 'upi']
+    merchants = ['flipkart', 'amazon', 'swiggy', 'zomato', 'myntra', 
+                 'uber', 'ola', 'bigbasket', 'jiomart', 'unknown']
+    devices = ['Android', 'iOS', 'Web', 'USSD']
+    
+    data = []
+    
+    # Generate LEGITIMATE transactions
+    for i in range(n_legit):
+        user_id = f"USER_{np.random.randint(1, 5001)}"
+        amount = min(np.random.lognormal(4, 1.5), 100000)
+        hour = np.random.randint(6, 22)
+        minute = np.random.randint(0, 60)
+        lat = np.random.normal(20.59, 5)
+        lon = np.random.normal(78.96, 5)
+        device = np.random.choice(devices, p=[0.55, 0.35, 0.08, 0.02])
+        txn_freq = np.random.poisson(3)
+        
+        data.append({
+            'transaction_id': f'TXN_{i:06d}',
+            'user_id': user_id,
+            'amount': round(amount, 2),
+            'hour': hour,
+            'minute': minute,
+            'latitude': round(lat, 4),
+            'longitude': round(lon, 4),
+            'device_type': device,
+            'bank_handle': np.random.choice(banks),
+            'merchant': np.random.choice(merchants, p=[0.15, 0.15, 0.1, 0.1, 0.05, 0.1, 0.1, 0.08, 0.07, 0.1]),
+            'txn_frequency_24h': txn_freq,
+            'is_fraud': 0
+        })
+    
+    # Generate FRAUDULENT transactions
+    for i in range(n_fraud):
+        user_id = f"USER_{np.random.randint(1, 5001)}"
+        fraud_type = np.random.choice(
+            ['high_amount', 'odd_time', 'location_jump', 'new_device', 'unusual_merchant'],
+            p=[0.25, 0.25, 0.2, 0.15, 0.15]
+        )
+        
+        if fraud_type == 'high_amount':
+            amount = np.random.uniform(50000, 200000)
+            hour = np.random.randint(8, 20)
+            lat, lon = np.random.normal(20.59, 5), np.random.normal(78.96, 5)
+            device = np.random.choice(devices, p=[0.55, 0.35, 0.08, 0.02])
+            merchant = np.random.choice(merchants)
+        elif fraud_type == 'odd_time':
+            amount = min(np.random.lognormal(4, 1), 100000)
+            hour = np.random.choice([0, 1, 2, 3, 4, 5])
+            lat, lon = np.random.normal(20.59, 5), np.random.normal(78.96, 5)
+            device = np.random.choice(devices, p=[0.55, 0.35, 0.08, 0.02])
+            merchant = np.random.choice(merchants)
+        elif fraud_type == 'location_jump':
+            amount = min(np.random.lognormal(4, 1), 100000)
+            hour = np.random.randint(8, 22)
+            lat = np.random.choice([28.61, 19.07, 13.08, 22.57, 26.85])
+            lon = np.random.choice([77.20, 72.87, 80.27, 88.36, 80.94])
+            device = np.random.choice(devices, p=[0.55, 0.35, 0.08, 0.02])
+            merchant = np.random.choice(merchants)
+        elif fraud_type == 'new_device':
+            amount = min(np.random.lognormal(4, 1), 100000)
+            hour = np.random.randint(8, 20)
+            lat, lon = np.random.normal(20.59, 5), np.random.normal(78.96, 5)
+            device = 'USSD'
+            merchant = np.random.choice(merchants)
+        else:
+            amount = min(np.random.lognormal(4, 1), 100000)
+            hour = np.random.randint(8, 20)
+            lat, lon = np.random.normal(20.59, 5), np.random.normal(78.96, 5)
+            device = np.random.choice(devices, p=[0.55, 0.35, 0.08, 0.02])
+            merchant = 'unknown'
+        
+        minute = np.random.randint(0, 60)
+        txn_freq = np.random.poisson(15)
+        
+        data.append({
+            'transaction_id': f'TXN_{n_legit + i:06d}',
+            'user_id': user_id,
+            'amount': round(amount, 2),
+            'hour': hour,
+            'minute': minute,
+            'latitude': round(lat, 4),
+            'longitude': round(lon, 4),
+            'device_type': device,
+            'bank_handle': np.random.choice(banks),
+            'merchant': merchant,
+            'txn_frequency_24h': txn_freq,
+            'is_fraud': 1
+        })
+    
+    df = pd.DataFrame(data)
+    df = df.sample(frac=1, random_state=42).reset_index(drop=True)
+    return df
+
+
+# ==============================================================================
+# FEATURE ENGINEERING
+# ==============================================================================
+
+def engineer_features(df):
+    """
+    Apply feature engineering to extract meaningful patterns from raw data.
+    
+    Parameters:
+    -----------
+    df : pd.DataFrame
+        Raw transaction DataFrame
+    
+    Returns:
+    --------
+    pd.DataFrame
+        DataFrame with engineered features
+    """
+    df_features = df.copy()
+    
+    # Time-based features
+    df_features['is_night'] = ((df_features['hour'] >= 0) & (df_features['hour'] <= 5)).astype(int)
+    df_features['time_segment'] = pd.cut(
+        df_features['hour'], 
+        bins=[0, 6, 12, 18, 24], 
+        labels=['Night', 'Morning', 'Afternoon', 'Evening'],
+        include_lowest=True
+    )
+    
+    # Amount-based features
+    df_features['amount_log'] = np.log1p(df_features['amount'])
+    df_features['is_high_amount'] = (df_features['amount'] > 50000).astype(int)
+    
+    # User-level statistics
+    user_stats = df_features.groupby('user_id')['amount'].agg(['mean', 'std', 'count']).reset_index()
+    user_stats.columns = ['user_id', 'user_avg_amount', 'user_std_amount', 'user_txn_count']
+    user_stats['user_std_amount'] = user_stats['user_std_amount'].fillna(0)
+    
+    df_features = df_features.merge(user_stats, on='user_id', how='left')
+    
+    # Amount deviation features
+    df_features['amount_deviation'] = abs(df_features['amount'] - df_features['user_avg_amount'])
+    df_features['amount_zscore'] = np.where(
+        df_features['user_std_amount'] > 0,
+        (df_features['amount'] - df_features['user_avg_amount']) / df_features['user_std_amount'],
+        0
+    )
+    
+    # Location-based features
+    df_features['distance_from_center'] = np.sqrt(
+        (df_features['latitude'] - 20.59)**2 + 
+        (df_features['longitude'] - 78.96)**2
+    )
+    
+    # Frequency features
+    df_features['is_high_frequency'] = (df_features['txn_frequency_24h'] > 10).astype(int)
+    
+    # Device risk score
+    device_risk = {'Android': 1, 'iOS': 1, 'Web': 2, 'USSD': 3}
+    df_features['device_risk'] = df_features['device_type'].map(device_risk)
+    
+    # Merchant risk score
+    merchant_risk = {m: 1 for m in df_features['merchant'].unique()}
+    merchant_risk['unknown'] = 3
+    df_features['merchant_risk'] = df_features['merchant'].map(merchant_risk)
+    
+    return df_features
+
+
+# ==============================================================================
+# DATA PREPROCESSING
+# ==============================================================================
+
+def preprocess_data(df_features, feature_columns=None):
+    """
+    Preprocess data for model training.
+    
+    Parameters:
+    -----------
+    df_features : pd.DataFrame
+        DataFrame with engineered features
+    feature_columns : list
+        List of feature column names
+    
+    Returns:
+    --------
+    tuple
+        (X_train, X_test, y_train, y_test, scaler)
+    """
+    if feature_columns is None:
+        feature_columns = ['amount', 'hour', 'is_night', 'amount_log', 'is_high_amount',
+                          'amount_deviation', 'amount_zscore', 'distance_from_center',
+                          'txn_frequency_24h', 'is_high_frequency', 'device_risk', 'merchant_risk']
+    
+    X = df_features[feature_columns]
+    y = df_features['is_fraud']
+    
+    # Handle categorical features
+    categorical_cols = X.select_dtypes(include=['object', 'category']).columns
+    if len(categorical_cols) > 0:
+        le = LabelEncoder()
+        for col in categorical_cols:
+            X[col] = le.fit_transform(X[col].astype(str))
+    
+    # Handle NaN values
+    X = X.fillna(0)
+    
+    # Train-test split
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, y, test_size=0.2, random_state=42, stratify=y
+    )
+    
+    # Feature scaling
+    scaler = StandardScaler()
+    X_train_scaled = scaler.fit_transform(X_train)
+    X_test_scaled = scaler.transform(X_test)
+    
+    return X_train_scaled, X_test_scaled, y_train, y_test, scaler, feature_columns
+
+
+# ==============================================================================
+# MODEL TRAINING & EVALUATION
+# ==============================================================================
+
+def train_and_evaluate_models(X_train, X_test, y_train, y_test):
+    """
+    Train multiple ML models and evaluate their performance.
+    
+    Parameters:
+    -----------
+    X_train, X_test : array-like
+        Training and test feature matrices
+    y_train, y_test : array-like
+        Training and test labels
+    
+    Returns:
+    --------
+    pd.DataFrame
+        Results comparison table
+    dict
+        Trained models dictionary
+    """
+    models = {
+        'Logistic Regression': LogisticRegression(random_state=42, max_iter=1000, class_weight='balanced'),
+        'Decision Tree': DecisionTreeClassifier(random_state=42, class_weight='balanced'),
+        'Random Forest': RandomForestClassifier(n_estimators=100, random_state=42, class_weight='balanced', n_jobs=-1),
+        'SVM': SVC(random_state=42, class_weight='balanced', probability=True),
+        'KNN': KNeighborsClassifier(n_neighbors=5),
+        'Isolation Forest': IsolationForest(random_state=42, contamination=0.05, n_jobs=-1)
+    }
+    
+    results = []
+    trained_models = {}
+    
+    for name, model in models.items():
+        print(f"\\nTraining {name}...")
+        
+        if name == 'Isolation Forest':
+            model.fit(X_train)
+            y_pred = model.predict(X_test)
+            y_pred = np.where(y_pred == -1, 1, 0)
+            y_prob = np.zeros(len(y_test))
+        else:
+            model.fit(X_train, y_train)
+            y_pred = model.predict(X_test)
+            y_prob = model.predict_proba(X_test)[:, 1]
+        
+        accuracy = accuracy_score(y_test, y_pred)
+        precision = precision_score(y_test, y_pred, zero_division=0)
+        recall = recall_score(y_test, y_pred, zero_division=0)
+        f1 = f1_score(y_test, y_pred, zero_division=0)
+        auc = roc_auc_score(y_test, y_prob) if name != 'Isolation Forest' else 0.5
+        
+        results.append({
+            'Model': name,
+            'Accuracy': accuracy,
+            'Precision': precision,
+            'Recall': recall,
+            'F1 Score': f1,
+            'AUC-ROC': auc
+        })
+        
+        trained_models[name] = model
+        print(f"  Accuracy: {accuracy:.4f} | F1: {f1:.4f} | AUC: {auc:.4f}")
+    
+    results_df = pd.DataFrame(results)
+    return results_df, trained_models
+
+
+def train_gradient_boosting(X_train, y_train):
+    """Train Gradient Boosting (or XGBoost if available) model."""
+    try:
+        import xgboost as xgb
+        model = xgb.XGBClassifier(
+            n_estimators=200, max_depth=6, learning_rate=0.1,
+            subsample=0.8, colsample_bytree=0.8, random_state=42,
+            scale_pos_weight=19, eval_metric='logloss'
+        )
+        model_name = "XGBoost"
+    except ImportError:
+        model = GradientBoostingClassifier(
+            n_estimators=200, max_depth=6, learning_rate=0.1, random_state=42
+        )
+        model_name = "Gradient Boosting"
+    
+    print(f"\\nTraining {model_name}...")
+    model.fit(X_train, y_train)
+    print(f"  {model_name} trained successfully!")
+    return model, model_name
+
+
+def evaluate_model(model, X_test, y_test, model_name="Model"):
+    """Evaluate a trained model and print detailed metrics."""
+    y_pred = model.predict(X_test)
+    y_prob = model.predict_proba(X_test)[:, 1]
+    
+    accuracy = accuracy_score(y_test, y_pred)
+    precision = precision_score(y_test, y_pred)
+    recall = recall_score(y_test, y_pred)
+    f1 = f1_score(y_test, y_pred)
+    auc = roc_auc_score(y_test, y_prob)
+    
+    cm = confusion_matrix(y_test, y_pred)
+    tn, fp, fn, tp = cm.ravel()
+    fpr = fp / (fp + tn)
+    fnr = fn / (fn + tp)
+    
+    print(f"\\n{'='*60}")
+    print(f"{model_name} EVALUATION RESULTS")
+    print(f"{'='*60}")
+    print(f"Accuracy:  {accuracy:.4f} ({accuracy*100:.2f}%)")
+    print(f"Precision: {precision:.4f} ({precision*100:.2f}%)")
+    print(f"Recall:    {recall:.4f} ({recall*100:.2f}%)")
+    print(f"F1 Score:  {f1:.4f} ({f1*100:.2f}%)")
+    print(f"AUC-ROC:   {auc:.4f}")
+    print(f"\\nConfusion Matrix:")
+    print(f"  TP={tp}, FP={fp}, FN={fn}, TN={tn}")
+    print(f"  FPR: {fpr*100:.2f}% | FNR: {fnr*100:.2f}%")
+    
+    return {
+        'accuracy': accuracy, 'precision': precision, 'recall': recall,
+        'f1': f1, 'auc': auc, 'cm': cm, 'fpr': fpr, 'fnr': fnr
+    }
+
+
+# ==============================================================================
+# REAL-TIME FRAUD DETECTION SYSTEM
+# ==============================================================================
+
+class UPIFraudDetector:
+    """
+    Real-time UPI Fraud Detection System.
+    
+    This class provides a complete pipeline for detecting fraudulent
+    UPI transactions in real-time using trained ML models.
+    """
+    
+    def __init__(self, model, scaler, feature_columns, threshold=0.8):
+        """
+        Initialize the fraud detector.
+        
+        Parameters:
+        -----------
+        model : sklearn estimator
+            Trained machine learning model
+        scaler : StandardScaler
+            Fitted feature scaler
+        feature_columns : list
+            List of feature column names
+        threshold : float
+            Probability threshold for fraud detection (default: 0.8)
+        """
+        self.model = model
+        self.scaler = scaler
+        self.feature_columns = feature_columns
+        self.threshold = threshold
+        self.alert_count = 0
+        self.blocked_count = 0
+        self.transaction_log = []
+    
+    def preprocess_transaction(self, transaction):
+        """Preprocess a single transaction for prediction."""
+        df = pd.DataFrame([transaction])
+        
+        # Apply feature engineering
+        df['is_night'] = ((df['hour'] >= 0) & (df['hour'] <= 5)).astype(int)
+        df['amount_log'] = np.log1p(df['amount'])
+        df['is_high_amount'] = (df['amount'] > 50000).astype(int)
+        df['amount_deviation'] = abs(df['amount'] - 500)
+        df['amount_zscore'] = 0
+        df['distance_from_center'] = np.sqrt(
+            (df['latitude'] - 20.59)**2 + (df['longitude'] - 78.96)**2
+        )
+        df['is_high_frequency'] = (df['txn_frequency_24h'] > 10).astype(int)
+        
+        device_risk = {'Android': 1, 'iOS': 1, 'Web': 2, 'USSD': 3}
+        df['device_risk'] = df['device_type'].map(device_risk).fillna(1)
+        
+        merchant_risk = {m: 1 for m in df['merchant'].unique()}
+        merchant_risk['unknown'] = 3
+        df['merchant_risk'] = df['merchant'].map(merchant_risk).fillna(1)
+        
+        return df[self.feature_columns]
+    
+    def predict(self, transaction):
+        """Predict if a transaction is fraudulent."""
+        X = self.preprocess_transaction(transaction)
+        X_scaled = self.scaler.transform(X)
+        probability = self.model.predict_proba(X_scaled)[0, 1]
+        prediction = 1 if probability >= self.threshold else 0
+        return prediction, probability
+    
+    def process_transaction(self, transaction):
+        """Process a transaction and generate alert if fraud detected."""
+        prediction, probability = self.predict(transaction)
+        
+        result = {
+            'transaction_id': transaction['transaction_id'],
+            'amount': transaction['amount'],
+            'prediction': 'FRAUD' if prediction == 1 else 'LEGITIMATE',
+            'confidence': probability,
+            'action': None,
+            'alert': False,
+            'timestamp': pd.Timestamp.now()
+        }
+        
+        if prediction == 1:
+            self.alert_count += 1
+            result['alert'] = True
+            
+            if probability > 0.95:
+                result['action'] = 'BLOCKED - High Risk'
+                self.blocked_count += 1
+            elif probability > 0.85:
+                result['action'] = 'FLAGGED - Additional Verification Required'
+            else:
+                result['action'] = 'FLAGGED - Review Recommended'
+        else:
+            result['action'] = 'APPROVED'
+        
+        self.transaction_log.append(result)
+        return result
+    
+    def generate_alert_message(self, result):
+        """Generate formatted alert message."""
+        if not result['alert']:
+            return None
+        
+        msg = f"""
+============================================================
+                    FRAUD ALERT
+============================================================
+Transaction ID: {result['transaction_id']}
+Amount: Rs. {result['amount']:.2f}
+Risk Score: {result['confidence']*100:.1f}%
+Status: {result['prediction']}
+Action: {result['action']}
+============================================================
+        """
+        return msg
+    
+    def get_summary(self):
+        """Get system summary statistics."""
+        total = len(self.transaction_log)
+        return {
+            'total_processed': total,
+            'alerts_generated': self.alert_count,
+            'transactions_blocked': self.blocked_count,
+            'fraud_rate': (self.alert_count / total * 100) if total > 0 else 0
+        }
+    
+    def save_model(self, filepath='upi_fraud_model.pkl'):
+        """Save the trained model and scaler."""
+        joblib.dump({'model': self.model, 'scaler': self.scaler, 
+                     'features': self.feature_columns}, filepath)
+        print(f"Model saved to {filepath}")
+    
+    @classmethod
+    def load_model(cls, filepath='upi_fraud_model.pkl', threshold=0.8):
+        """Load a saved model and create detector instance."""
+        data = joblib.load(filepath)
+        return cls(data['model'], data['scaler'], data['features'], threshold)
+
+
+# ==============================================================================
+#  MAIN EXECUTION PIPELINE
+# ==============================================================================
+
+def main():
+    """Main execution pipeline for UPI Fraud Detection System."""
+    
+    print("=" * 70)
+    print("         UPI FRAUD DETECTION SYSTEM - MAIN PIPELINE")
+    print("=" * 70)
+    
+    # Step 1: Data Generation
+    print("\\n[STEP 1] Generating synthetic UPI transaction dataset...")
+    df = generate_upi_dataset(n_samples=100000, fraud_ratio=0.05)
+    print(f"  Total transactions: {len(df)}")
+    print(f"  Fraudulent: {df['is_fraud'].sum()} ({df['is_fraud'].mean()*100:.2f}%)")
+    
+    # Step 2: Feature Engineering
+    print("\\n[STEP 2] Engineering features...")
+    df_features = engineer_features(df)
+    print(f"  Features created: {len([c for c in df_features.columns if c not in df.columns])}")
+    
+    # Step 3: Preprocessing
+    print("\\n[STEP 3] Preprocessing data...")
+    X_train, X_test, y_train, y_test, scaler, feature_cols = preprocess_data(df_features)
+    print(f"  Training samples: {len(X_train)}")
+    print(f"  Test samples: {len(X_test)}")
+    
+    # Step 4: Train Multiple Models
+    print("\\n[STEP 4] Training and evaluating models...")
+    results_df, trained_models = train_and_evaluate_models(X_train, X_test, y_train, y_test)
+    print("\\n" + "=" * 70)
+    print("MODEL COMPARISON RESULTS")
+    print("=" * 70)
+    print(results_df.to_string(index=False))
+    
+    # Step 5: Train Best Model (Gradient Boosting)
+    print("\\n[STEP 5] Training advanced model (Gradient Boosting)...")
+    best_model, best_name = train_gradient_boosting(X_train, y_train)
+    best_metrics = evaluate_model(best_model, X_test, y_test, best_name)
+    
+    # Step 6: Initialize Real-Time Detector
+    print("\\n[STEP 6] Initializing real-time fraud detector...")
+    detector = UPIFraudDetector(best_model, scaler, feature_cols, threshold=0.8)
+    
+    # Step 7: Test with sample transactions
+    print("\\n[STEP 7] Testing with sample transactions...")
+    test_transactions = [
+        {
+            'transaction_id': 'TXN_001',
+            'user_id': 'USER_1234',
+            'amount': 250.00,
+            'hour': 14, 'minute': 30,
+            'latitude': 20.59, 'longitude': 78.96,
+            'device_type': 'Android',
+            'bank_handle': 'okhdfc',
+            'merchant': 'swiggy',
+            'txn_frequency_24h': 2
+        },
+        {
+            'transaction_id': 'TXN_002',
+            'user_id': 'USER_5678',
+            'amount': 75000.00,
+            'hour': 3, 'minute': 15,
+            'latitude': 28.61, 'longitude': 77.20,
+            'device_type': 'USSD',
+            'bank_handle': 'upi',
+            'merchant': 'unknown',
+            'txn_frequency_24h': 18
+        },
+        {
+            'transaction_id': 'TXN_003',
+            'user_id': 'USER_9999',
+            'amount': 5000.00,
+            'hour': 10, 'minute': 45,
+            'latitude': 13.08, 'longitude': 80.27,
+            'device_type': 'Web',
+            'bank_handle': 'phonepe',
+            'merchant': 'amazon',
+            'txn_frequency_24h': 25
+        }
+    ]
+    
+    for txn in test_transactions:
+        result = detector.process_transaction(txn)
+        alert = detector.generate_alert_message(result)
+        
+        print(f"\\n  {txn['transaction_id']}: {result['prediction']} "
+              f"(Confidence: {result['confidence']*100:.1f}%)")
+        print(f"  Action: {result['action']}")
+        if alert:
+            print(alert)
+    
+    # Summary
+    summary = detector.get_summary()
+    print("\\n" + "=" * 70)
+    print("SYSTEM SUMMARY")
+    print("=" * 70)
+    print(f"Total transactions processed: {summary['total_processed']}")
+    print(f"Alerts generated: {summary['alerts_generated']}")
+    print(f"Transactions blocked: {summary['transactions_blocked']}")
+    print(f"Fraud detection rate: {summary['fraud_rate']:.2f}%")
+    
+    # Save model
+    detector.save_model('upi_fraud_model.pkl')
+    
+    print("\\n" + "=" * 70)
+    print("PIPELINE COMPLETED SUCCESSFULLY!")
+    print("=" * 70)
+    
+    return detector, results_df, best_metrics
+
+
+# ==============================================================================
+# ENTRY POINT
+# ==============================================================================
+
+if __name__ == "__main__":
+    detector, results, metrics = main()
+    
+   
