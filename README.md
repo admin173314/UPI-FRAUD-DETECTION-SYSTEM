@@ -3,13 +3,6 @@ UPI FRAUD DETECTION SYSTEM
  PROJECT REPORT
                               (UPI FRAUD DETECTION SYSTEM)
 
-ACKNOWLEDGEMENT
-Firstly, I express my heartiest thanks and gratefulness to almighty God for His divine blessing makes us possible to complete the project work successfully. I really grateful and wish my profound my indebtedness to Supervisor MR. SATYAM CHOUDHARY, Assistant Professor, Department of BCA “GLA UNIVERSITY”. Her endless patience, scholarly guidance, continual encouragement, constant and energetic supervision, constructive criticism, valuable advice, reading many inferior drafts and correcting them at all stage have made it possible to complete this project.
-I would like to express my heartiest gratitude to MR. PROF (DR) SURESH C. JOSHI, Department of BCA, for his kind help to finish my project.
-I would also generously welcome each one of those individuals who have helped me straight forwardly or in a roundabout way in making the project a win. In this unique situation, I might want to thank the various staff individuals, both educating and non-instructing, which have developed their convenient help and facilitated my undertaking.
-Finally, I must acknowledge with due respect the constant support and patience of my parents.
-
- 
 Table of Contents
 
 Certificate	i
